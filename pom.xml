@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>ca.phon</groupId>
+    <artifactId>phon-uri-loader-windows</artifactId>
+    <version>1-SNAPSHOT</version>
+
+    <distributionManagement>
+        <repository>
+            <id>github</id>
+            <name>GitHub phon-ca Apache Maven Packages</name>
+            <url>https://maven.pkg.github.com/phon-ca/phon-uri-loader-windows</url>
+        </repository>
+    </distributionManagement>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <ca.phon.app.version>3.5.0-SNAPSHOT</ca.phon.app.version>
+        <com.install4j.install4j-runtime.version>10.0.2</com.install4j.install4j-runtime.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>ca.phon</groupId>
+            <artifactId>phon-app</artifactId>
+            <version>3.5.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>com.install4j</groupId>
+            <artifactId>install4j-runtime</artifactId>
+            <version>${com.install4j.install4j-runtime.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.13.1</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+</project>
