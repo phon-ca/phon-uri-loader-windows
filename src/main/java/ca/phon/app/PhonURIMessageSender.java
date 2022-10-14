@@ -1,6 +1,5 @@
 package ca.phon.app;
 
-import com.install4j.api.launcher.ApplicationLauncher;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.platform.win32.User32;
@@ -12,6 +11,12 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.UUID;
 
+/**
+ * Send message to custom message handler window using WM_USER message. A new launcher will
+ * be created by the installer at bin/phon_uri_handler.exe which executes this program. If
+ * Phon is not running (i.e., the message window is not found) it is opened with the uri
+ * as an argument.
+ */
 public final class PhonURIMessageSender {
 
     private final static String USE_MSG = "Usage phon_uri_handler <phon:uri>";
@@ -37,8 +42,7 @@ public final class PhonURIMessageSender {
     private static void sendURI(URI uri) throws IOException {
         WinDef.HWND hWnd = determineHWNDFromWindowClass(WindowsURIHandler.WINDOW_CLASS);
         if(hWnd == null) {
-            // Phon not running, execute launcher
-            runPhonWithURI(uri);
+            openPhonWithURI(uri);
         } else {
             final UUID uuid = UUID.randomUUID();
             final long messageId = uuid.getLeastSignificantBits();
@@ -58,19 +62,15 @@ public final class PhonURIMessageSender {
         }
     }
 
-    private static void runPhonWithURI(URI uri) throws IOException {
-        final String[] args = {uri.toString()};
-        ApplicationLauncher.launchApplication("phon-windows", args, false, new ApplicationLauncher.Callback() {
-            @Override
-            public void exited(int i) {
+    private static void openPhonWithURI(URI uri) throws IOException {
+        String exeName = "Phon";
+        if(VersionInfo.getInstance().getPreRelease() != null) {
+            exeName += VersionInfo.getInstance().getPreRelease().split("\\.")[0];
+        }
+        exeName += ".exe";
 
-            }
-
-            @Override
-            public void prepareShutdown() {
-
-            }
-        });
+        final ProcessBuilder pb = new ProcessBuilder(exeName, uri.toString());
+        pb.start();
     }
 
     public static WinDef.HWND determineHWNDFromWindowClass(String windowClass) {
