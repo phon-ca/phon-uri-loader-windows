@@ -6,7 +6,7 @@
 
     <groupId>ca.phon</groupId>
     <artifactId>phon-uri-loader-windows</artifactId>
-    <version>6</version>
+    <version>7</version>
 
     <distributionManagement>
         <repository>

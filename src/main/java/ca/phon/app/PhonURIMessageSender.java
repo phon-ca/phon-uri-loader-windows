@@ -65,7 +65,7 @@ public final class PhonURIMessageSender {
     private static void openPhonWithURI(URI uri) throws IOException {
         String exeName = "Phon";
         if(VersionInfo.getInstance().getPreRelease() != null) {
-            exeName += VersionInfo.getInstance().getPreRelease().split("\\.")[0];
+            exeName += "-" + VersionInfo.getInstance().getPreRelease().split("\\.")[0];
         }
         exeName += ".exe";
 
