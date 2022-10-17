@@ -9,11 +9,13 @@ import ca.phon.plugin.PluginException;
 import ca.phon.util.OSInfo;
 import ca.phon.util.PrefHelper;
 import ca.phon.worker.PhonWorker;
+import com.sun.jna.*;
 import com.sun.jna.platform.win32.*;
 
 import java.io.*;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.UUID;
 
 /**
  * Create a hidden message window for handling uri load requests on windows.
@@ -24,7 +26,7 @@ import java.net.URISyntaxException;
  */
 public final class WindowsURIHandler implements PhonStartupHook, IPluginExtensionPoint<PhonStartupHook> {
 
-    public final static String WINDOW_CLASS = "Phon_uri_handler";
+    private final static String WINDOW_CLASS = "Phon_uri_handler";
 
     private final static String URI_HANDLER_FOLDER = "uri_requests";
 
@@ -60,7 +62,7 @@ public final class WindowsURIHandler implements PhonStartupHook, IPluginExtensio
         }
     }
 
-    public void createWindow(final String windowClass) {
+    private void createWindow(final String windowClass) {
         // Runs it in a specific thread because the main thread is blocked in infinite loop otherwise.
         PhonWorker.invokeOnNewWorker(() -> {
             try {
@@ -71,47 +73,70 @@ public final class WindowsURIHandler implements PhonStartupHook, IPluginExtensio
         });
     }
 
+    public static WinDef.HWND getMessageHWND() {
+        return determineHWNDFromWindowClass(WINDOW_CLASS);
+    }
+
+    private static void sendOpenURIMessage(URI uri) throws IOException {
+        WinDef.HWND hWnd = WindowsURIHandler.getMessageHWND();
+        if(hWnd == null) {
+           openPhonWithURI(uri);
+        } else {
+            final UUID uuid = UUID.randomUUID();
+            final long messageId = uuid.getLeastSignificantBits();
+
+            final File uriRequestFile = WindowsURIHandler.uriRequestFileFromId(messageId);
+            try(final PrintWriter printWriter =
+                        new PrintWriter(new OutputStreamWriter(new FileOutputStream(uriRequestFile), "UTF-8"))) {
+                printWriter.write(uri.toString());
+                printWriter.write("\r\n");
+                printWriter.flush();
+            }
+
+            WinDef.LRESULT result = User32.INSTANCE.SendMessage(hWnd, WinUser.WM_USER, new WinDef.WPARAM(0),
+                    new WinDef.LPARAM(messageId));
+            if(result.intValue() != 0) {
+                throw new IOException("Unable to send WM_USER message");
+            }
+        }
+    }
+
     private void createWindowAndLoop(String windowClass) {
         // define new window class
         WinDef.HMODULE hInst = Kernel32.INSTANCE.GetModuleHandle("");
 
         WinUser.WNDCLASSEX wClass = new WinUser.WNDCLASSEX();
         wClass.hInstance = hInst;
-        wClass.lpfnWndProc = new WinUser.WindowProc() {
-
-            @Override
-            public WinDef.LRESULT callback(WinDef.HWND hwnd, int uMsg, WinDef.WPARAM wParam, WinDef.LPARAM lParam) {
-                // log(hwnd + " - received a message : " + uMsg);
-                switch (uMsg) {
-                    case WinUser.WM_CREATE: {
-                        LogUtil.info("Windows message handler window created");
-                        return new WinDef.LRESULT(0);
-                    }
-                    case WinUser.WM_CLOSE:
-                        LogUtil.info("Windows message handler window destroyed");
-                        User32.INSTANCE.DestroyWindow(hwnd);
-                        return new WinDef.LRESULT(0);
-                    case WinUser.WM_DESTROY: {
-                        User32.INSTANCE.PostQuitMessage(0);
-                        return new WinDef.LRESULT(0);
-                    }
-                    case WinUser.WM_USER: {
-                        LogUtil.info("WM_USER message with lParam " + Long.toHexString(lParam.longValue()));
-                        if(lParam.longValue() != 0) {
-                            PhonWorker.getInstance().invokeLater(() -> {
-                                try {
-                                    processMessageWithId(lParam.longValue());
-                                } catch (IOException | URISyntaxException | PluginException e) {
-                                    LogUtil.warning(e);
-                                }
-                            });
-                        }
-                        return new WinDef.LRESULT(0);
-                    }
-
-                    default:
-                        return User32.INSTANCE.DefWindowProc(hwnd, uMsg, wParam, lParam);
+        wClass.lpfnWndProc = (WinUser.WindowProc) (hwnd, uMsg, wParam, lParam) -> {
+            switch (uMsg) {
+                case WinUser.WM_CREATE: {
+                    LogUtil.info("Windows message handler window created");
+                    return new WinDef.LRESULT(0);
                 }
+                case WinUser.WM_CLOSE:
+                    LogUtil.info("Windows message handler window destroyed");
+                    User32.INSTANCE.DestroyWindow(hwnd);
+                    return new WinDef.LRESULT(0);
+                case WinUser.WM_DESTROY: {
+                    User32.INSTANCE.PostQuitMessage(0);
+                    return new WinDef.LRESULT(0);
+                }
+                case WinUser.WM_USER: {
+                    LogUtil.info("WM_USER message with lParam " + Long.toHexString(lParam.longValue()));
+                    if(lParam.longValue() != 0) {
+                        PhonWorker.getInstance().invokeLater(() -> {
+                            try {
+                                processMessageWithId(lParam.longValue());
+                            } catch (IOException | URISyntaxException | PluginException e) {
+                                LogUtil.warning(e);
+                            }
+                        });
+                    }
+                    return new WinDef.LRESULT(0);
+                }
+
+                default:
+                    return User32.INSTANCE.DefWindowProc(hwnd, uMsg, wParam, lParam);
             }
         };
         wClass.lpszClassName = windowClass;
@@ -122,9 +147,8 @@ public final class WindowsURIHandler implements PhonStartupHook, IPluginExtensio
 
         // create new window
         WinDef.HWND hWnd = User32.INSTANCE.CreateWindowEx(User32.WS_EX_TOPMOST, windowClass,
-                "Hidden helper window, used only to catch uri request events", 0, 0, 0, 0, 0, null, null, hInst,
+                "Phon URI message handler", 0, 0, 0, 0, 0, null, null, hInst,
                 null);
-
         //getLastError();
 
         WinUser.MSG msg = new WinUser.MSG();
@@ -137,6 +161,44 @@ public final class WindowsURIHandler implements PhonStartupHook, IPluginExtensio
         User32.INSTANCE.DestroyWindow(hWnd);
     }
 
+    private static WinDef.HWND determineHWNDFromWindowClass(String windowClass) {
+        WindowsURIHandler.CallBackFindWindowHandleByWindowclass cb = new WindowsURIHandler.CallBackFindWindowHandleByWindowclass(windowClass);
+        User32.INSTANCE.EnumWindows(cb, null);
+        return cb.getFoundHwnd();
+    }
+
+    private static class CallBackFindWindowHandleByWindowclass implements WinUser.WNDENUMPROC {
+
+        private WinDef.HWND found;
+
+        private String windowClass;
+
+        public CallBackFindWindowHandleByWindowclass(String windowClass) {
+            this.windowClass = windowClass;
+        }
+
+        @Override
+        public boolean callback(WinDef.HWND hWnd, Pointer data) {
+
+            char[] windowText = new char[512];
+            User32.INSTANCE.GetClassName(hWnd, windowText, windowText.length);
+            String className = Native.toString(windowText);
+
+            if (windowClass.equalsIgnoreCase(className)) {
+                // Found handle. No determine root window...
+                WinDef.HWND hWndAncestor = User32.INSTANCE.GetAncestor(hWnd, User32.GA_ROOTOWNER);
+                found = hWndAncestor;
+                return false;
+            }
+            return true;
+        }
+
+        public WinDef.HWND getFoundHwnd() {
+            return this.found;
+        }
+
+    }
+
     @Override
     public Class<?> getExtensionType() {
         return PhonStartupHook.class;
@@ -145,6 +207,42 @@ public final class WindowsURIHandler implements PhonStartupHook, IPluginExtensio
     @Override
     public IPluginExtensionFactory<PhonStartupHook> getFactory() {
         return (args) -> this;
+    }
+
+    private final static String USE_MSG = "Usage phon_uri_handler <phon:uri>";
+
+    /**
+     * Send message to custom message handler window using WM_USER message. A new launcher will
+     * be created by the installer at bin/phon_uri_handler.exe which executes this program. If
+     * Phon is not running (i.e., the message window is not found) it is opened with the uri
+     * as an argument.
+     */
+    public static void main(String[] args) {
+        if(args.length != 1) {
+            System.err.println(USE_MSG);
+            System.exit(1);
+        }
+
+        final String uri = args[0].trim();
+        try {
+            URI parsedURI = new URI(uri);
+            sendOpenURIMessage(parsedURI);
+            System.exit(0);
+        } catch (IOException | URISyntaxException e) {
+            System.err.println("Invalid URI " + uri + ", " + e.getMessage());
+            System.exit(2);
+        }
+    }
+
+    private static void openPhonWithURI(URI uri) throws IOException {
+        String exeName = "Phon";
+        if(VersionInfo.getInstance().getPreRelease() != null) {
+            exeName += "-" + VersionInfo.getInstance().getPreRelease().split("\\.")[0];
+        }
+        exeName += ".exe";
+
+        final ProcessBuilder pb = new ProcessBuilder(exeName, uri.toString());
+        pb.start();
     }
 
 }
